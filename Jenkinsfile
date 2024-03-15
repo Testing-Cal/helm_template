@@ -56,8 +56,8 @@ pipeline {
                     env.RELEASE_NAME = generalPresent.helmReleaseName
                     env.ARTIFACTORY = generalPresent.artifactory
                     env.ACTION = generalPresent.deploymentAction
-                    env.ARTIFACTORY_SECRET = generalPresent.artifactoryCredentialId
-                    env.KUBERNETES_SECRET = generalPresent.kubernetesCredentialId
+                    env.ARTIFACTORY_SECRET = generalPresent.artifactorySecret
+                    env.KUBERNETES_SECRET = generalPresent.kubernetesSecret
 
                     env.DEPLOYMENT_TYPE = generalPresent.deploymentType
                     env.ARTIFACTORY_URL = generalPresent.artifactoryURL
