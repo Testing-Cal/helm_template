@@ -18,10 +18,26 @@ metadata:
   name: {{ $fullName }}
   labels:
     {{- include "helm_chart.labels" . | nindent 4 }}
-  {{- with .Values.ingress.annotations }}
   annotations:
+{{- with .Values.ingress.annotations }}
+  {{- toYaml . | nindent 4 }}
+{{- end }}
+{{- if eq .Values.ingress.controllerType  "alb" }}
+  {{- with .Values.ingress.albAnnotations }}
     {{- toYaml . | nindent 4 }}
   {{- end }}
+  {{- with .Values.ingress.albExtraAnnotations }}
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- if eq .Values.ingress.controllerType  "nginx" }}
+  {{- with .Values.ingress.nginxAnnotations }}
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.ingress.nginxExtraAnnotations }}
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
 spec:
   {{- if and .Values.ingress.ingressClass (semverCompare ">=1.18-0" .Capabilities.KubeVersion.GitVersion) }}
   ingressClassName: {{ .Values.ingress.ingressClass }}
