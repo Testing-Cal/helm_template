@@ -37,6 +37,8 @@ spec:
             - name: http
               containerPort: {{ .Values.ports.containerPort }}
               protocol: {{ .Values.ports.protocol }}
+          securityContext:
+             {{- toYaml .Values.securityContext | nindent 12 }}
           livenessProbe:
             httpGet:
               path: /
