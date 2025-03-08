@@ -1,0 +1,79 @@
+name: Deploy-to-EKS-Dev
+
+on: [workflow_dispatch]
+
+jobs:
+  EKS-Deploy:
+    runs-on: ${{ vars.RUNNER_NAME_DEV }}
+    environment:
+      name: Dev
+    env:
+      KUBECTL_IMAGE_VERSION: "bitnami/kubectl:1.28" #https://hub.docker.com/r/bitnami/kubectl/tags
+      HELM_IMAGE_VERSION: "alpine/helm:3.8.1" #https://hub.docker.com/r/alpine/helm/tags
+      OC_IMAGE_VERSION: "quay.io/openshift/origin-cli:4.9.0" #https://quay.io/repository/openshift/origin-cli?tab=tags
+
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v2
+          
+      - name: Initialization
+        run: |
+          sudo apt install yq -y 
+          JSON_STRING='${{ vars.BUILD_METADATA }}'
+         
+          echo "REGISTRY_URL=$(echo "$JSON_STRING" | jq -r '.general.containerImagePath')" >> "$GITHUB_ENV"
+          echo "BUILD_TAG=$(echo "$JSON_STRING" | jq -r '.general.containerImageTag')"  >> "$GITHUB_ENV"
+          echo "ARTIFACTORY=$(echo "$JSON_STRING" | jq -r '.general.artifactory')"  >> "$GITHUB_ENV"
+          echo "RELEASE_NAME=$(echo "$JSON_STRING" | jq -r '.general.name')"  >> "$GITHUB_ENV"
+          echo "CONTEXT=$(echo "$JSON_STRING" | jq -r '.general.contextPath')" >> "$GITHUB_ENV"
+          
+          echo "HELM_RELEASE_NAME=$(echo "$JSON_STRING" | jq -r '.general.helmReleaseName')" >> "$GITHUB_ENV"
+          echo "KUBE_NAMESPACE=$(echo "$JSON_STRING" | jq -r '.kubernetes.namespace')" >> "$GITHUB_ENV"
+          echo "ARTIFACTORY_USER_SECRET=$(echo "$JSON_STRING" | jq -r '.general.ArtifactoryUserSecret')" >> "$GITHUB_ENV"
+          echo "ARTIFACTORY_PASSWORD_SECRET=$(echo "$JSON_STRING" | jq -r '.general.ArtifactoryPasswordSecret')" >> "$GITHUB_ENV"
+          echo "DOCKER_LOGIN_URL=$(echo "$REGISTRY_URL" | cut -d'/' -f1)" >> "$GITHUB_ENV"
+          
+          echo "$JSON_STRING" | jq -r '.kubernetes' | yq --yaml-output > Helm.yaml
+          #echo "$JSON_STRING" | jq -r '.kubernetes.vault' | yq  > Vault.yaml    
+          
+
+      - name: Configure Kubeconfig File
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ env.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
+          
+      - name: Deploy to Kubernetes
+        run: |
+           echo "DOCKER_LOGIN_URL=$(echo "$REGISTRY_URL" | cut -d'/' -f1)" >> "$GITHUB_ENV"
+           docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" $KUBECTL_IMAGE_VERSION create ns "$KUBE_NAMESPACE" || true
+           if [[ $DEPLOYMENT_TYPE == 'OPENSHIFT' ]]
+           then
+              COUNT=$(grep 'serviceAccount' Helm.yaml | wc -l)
+              if [[ $COUNT -gt 0 ]]
+              then
+                  ACCOUNT=$(grep 'serviceAccount:' Helm.yaml | tail -n1 | awk '{ print $2}')
+                  echo $ACCOUNT
+              else
+                  ACCOUNT='default'
+              fi
+              docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $OC_IMAGE_VERSION oc adm policy add-scc-to-user anyuid -z $ACCOUNT -n "$KUBE_NAMESPACE"
+           fi
+           
+            
+           if [[ $ARTIFACTORY != "ECR" ]]
+           then
+             ## hardcoded name regcred need to be change
+             docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" $KUBECTL_IMAGE_VERSION -n "$KUBE_NAMESPACE" delete secret regcred --ignore-not-found || true
+             docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" $KUBECTL_IMAGE_VERSION -n "$KUBE_NAMESPACE" create secret docker-registry regcred --docker-server="$DOCKER_LOGIN_URL" --docker-username=${{ secrets[env.ARTIFACTORY_USER_SECRET] }} --docker-password=${{ secrets[env.ARTIFACTORY_PASSWORD_SECRET] }} || true
+           fi
+            
+           echo "context: $CONTEXT" >> Helm.yaml
+           cat Helm.yaml
+           sed -i s+#SERVICE_NAME#+"$HELM_RELEASE_NAME"+g ./helm_chart/values.yaml ./helm_chart/Chart.yaml
+           docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION template "$HELM_RELEASE_NAME" -n "$KUBE_NAMESPACE" helm_chart --atomic --timeout 300s --set image.repository="$REGISTRY_URL" --set image.tag="$BUILD_TAG" --set image.registrySecret="regcred" -f Helm.yaml
+           docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION upgrade --install "$HELM_RELEASE_NAME" -n "$KUBE_NAMESPACE" helm_chart --atomic --timeout 300s --set image.repository="$REGISTRY_URL" --set image.tag="$BUILD_TAG" --set image.registrySecret="regcred" -f Helm.yaml
+
+           
