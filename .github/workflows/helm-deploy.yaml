@@ -113,11 +113,11 @@ jobs:
                 if [[ $DEPLOYMENT_TYPE == 'OPENSHIFT' && $CONTEXT_PATH != '' ]];then 
                     docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION template "$RELEASE_NAME" ./$HELM_CHART_LOCATION -n "$KUBERNETES_NAMESPACE" --values ./helm_chart/values.yaml --set ingress.enabled=false --set oc.route.enabled="true" --set oc.route.host=$HOST_NAME --set context=$CONTEXT_PATH $HELM_VALUES -f Helm.yaml
                     docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION upgrade --install $HELM_ARGUMENTS "$RELEASE_NAME" ./$HELM_CHART_LOCATION -n "$KUBERNETES_NAMESPACE" --values ./helm_chart/values.yaml --set ingress.enabled="false" --set oc.route.enabled="true" --set oc.route.host=$HOST_NAME --set context=$CONTEXT_PATH $HELM_VALUES -f Helm.yaml
-                else if [[ $DEPLOYMENT_TYPE == 'OPENSHIFT' && $CONTEXT_PATH == '' ]];then
+                elif [[ $DEPLOYMENT_TYPE == 'OPENSHIFT' && $CONTEXT_PATH == '' ]];then
                     # Openshift Deployment without Context Path 
                     docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION template "$RELEASE_NAME" ./$HELM_CHART_LOCATION -n "$KUBERNETES_NAMESPACE" --values ./helm_chart/values.yaml --set ingress.enabled=false --set oc.route.enabled="true" --set oc.route.host=$HOST_NAME $HELM_VALUES -f Helm.yaml
                     docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION upgrade --install $HELM_ARGUMENTS "$RELEASE_NAME" ./$HELM_CHART_LOCATION -n "$KUBERNETES_NAMESPACE" --values ./helm_chart/values.yaml --set ingress.enabled="false" --set oc.route.enabled="true" --set oc.route.host=$HOST_NAME $HELM_VALUES -f Helm.yaml
-                else if [[ $CONTEXT_PATH == '' ]];then 
+                elif [[ $CONTEXT_PATH == '' ]];then 
                     # K8s Deployment without context path
                     docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION upgrade --install $HELM_ARGUMENTS "$RELEASE_NAME" ./$HELM_CHART_LOCATION -n "$KUBERNETES_NAMESPACE" --values ./helm_chart/values.yaml $HELM_VALUES -f Helm.yaml
                 else
