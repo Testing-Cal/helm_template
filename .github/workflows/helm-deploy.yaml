@@ -57,6 +57,8 @@ jobs:
           echo "HELM_ROLLBACK_VERSION=$(echo "$JSON_STRING" | jq -r '.helm.rollbackVersion')" >> "$GITHUB_ENV"
           echo "HOST_NAME=$(echo "$JSON_STRING" | jq -r '.kubernetes.oc.route.host')" >> "$GITHUB_ENV"
 
+          echo "$JSON_STRING" | jq -r '.helm.values' | yq --yaml-output > Helm.yaml
+
           # For helm Repo Authentication
           echo "HELM_REPO_URL=$(echo "$JSON_STRING" | jq -r '.helm.repoURL')" >> "$GITHUB_ENV"
           echo "HELM_REPO_USERNAME=$(echo "$JSON_STRING" | jq -r '.helm.repoUsername')" >> "$GITHUB_ENV"
