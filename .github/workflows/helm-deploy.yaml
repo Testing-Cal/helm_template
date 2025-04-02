@@ -65,7 +65,7 @@ jobs:
           # validating release name
           export "RELEASE_NAME_HELM=$(echo "$JSON_STRING" | jq -r '.general.name')"
           set +x
-          if [[ $RELEASE_NAME =~ ^[A-Za-z0-9-]+$ ]]; then
+          if [[ $RELEASE_NAME_HELM =~ ^[A-Za-z0-9-]+$ ]]; then
               echo "Helm release name is valid"
           else
               echo "Helm release name is not valid"
