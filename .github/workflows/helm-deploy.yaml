@@ -1,0 +1,81 @@
+name: Deploy-to-helm-Dev
+
+on: 
+  workflow_dispatch:
+  workflow_run:
+    workflows: 'CI-Dev'
+    types:
+      - completed
+
+jobs:
+  continuous-deployment:
+    runs-on: ${{ vars.RUNNER_NAME_DEV}}
+    environment:
+      name: "Dev"
+    env:
+      KUBECTL_IMAGE_VERSION: "bitnami/kubectl:1.28" #https://hub.docker.com/r/bitnami/kubectl/tags
+      HELM_IMAGE_VERSION: "alpine/helm:3.8.1" #https://hub.docker.com/r/alpine/helm/tags
+      OC_IMAGE_VERSION: "quay.io/openshift/origin-cli:4.9.0" #https://quay.io/repository/openshift/origin-cli?tab=tags
+
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v2
+          
+      - name: Initialization
+        run: |
+          sudo apt install yq -y 
+          JSON_STRING='${{ vars.BUILD_METADATA }}'
+
+          # push to collector
+          echo "TENANT_ID=$(echo "$JSON_STRING" | jq -r '.general.tenant')" >> "$GITHUB_ENV"
+          echo "TARGET_URI=$(echo "$JSON_STRING" | jq -r '.general.lazsaDomainUri')" >> "$GITHUB_ENV"
+          echo "AGENT_ID=$(echo "$JSON_STRING" | jq -r '.general.agentId')" >> "$GITHUB_ENV"
+          echo "AGENT_API_KEY=$(echo "$JSON_STRING" | jq -r '.general.agentApiKey')" >> "$GITHUB_ENV"
+          echo "DEVOPS_SETTING_ID=$(echo "$JSON_STRING" | jq -r '.general.devopsSettingId')" >> "$GITHUB_ENV"
+         
+          echo "REGISTRY_URL=$(echo "$JSON_STRING" | jq -r '.general.containerImagePath')" >> "$GITHUB_ENV"
+          echo "BUILD_TAG=$(echo "$JSON_STRING" | jq -r '.general.containerImageTag')"  >> "$GITHUB_ENV"
+          echo "ARTIFACTORY=$(echo "$JSON_STRING" | jq -r '.general.artifactory')"  >> "$GITHUB_ENV"
+          echo "RELEASE_NAME=$(echo "$JSON_STRING" | jq -r '.general.name')"  >> "$GITHUB_ENV"
+          echo "CONTEXT=$(echo "$JSON_STRING" | jq -r '.general.contextPath')" >> "$GITHUB_ENV"
+          echo "ACTION=$(echo "$JSON_STRING" | jq -r '.general.action')" >> "$GITHUB_ENV"
+          echo "ARTIFACTORY_USER_SECRET=$(echo "$JSON_STRING" | jq -r '.general.ArtifactoryUserSecret')" >> "$GITHUB_ENV"
+          echo "ARTIFACTORY_PASSWORD_SECRET=$(echo "$JSON_STRING" | jq -r '.general.ArtifactoryPasswordSecret')" >> "$GITHUB_ENV"
+          echo "KUBERNETES_SECRET=$(echo "$JSON_STRING" | jq -r '.general.kubernetesSecret')" >> "$GITHUB_ENV"
+          echo "ARTIFACTORY_URL=$(echo "$JSON_STRING" | jq -r '.general.artifactoryURL')" >> "$GITHUB_ENV"
+          echo "DEPLOYMENT_TYPE=$(echo "$JSON_STRING" | jq -r '.general.deploymentType')" >> "$GITHUB_ENV"
+
+          # Helm variables
+          echo "KUBERNETES_NAMESPACE=$(echo "$JSON_STRING" | jq -r '.helm.namespace')" >> "$GITHUB_ENV"
+          echo "HELM_ARGUMENTS=$(echo "$JSON_STRING" | jq -r '.helm.additionalArguments')" >> "$GITHUB_ENV"
+          echo "HELM_VALUES=$(echo "$JSON_STRING" | jq -r '.helm.additionalFiles')" >> "$GITHUB_ENV"
+          echo "HELM_CHART_LOCATION=$(echo "$JSON_STRING" | jq -r '.helm.workingDirectory')" >> "$GITHUB_ENV"
+          echo "HELM_CHART_TYPE=$(echo "$JSON_STRING" | jq -r '.helm.type')" >> "$GITHUB_ENV"
+          echo "HELM_CHART_VERSION=$(echo "$JSON_STRING" | jq -r '.helm.version')" >> "$GITHUB_ENV"
+          echo "HELM_REPO_AUTHENTICATION=$(echo "$JSON_STRING" | jq -r '.helm.repoAuthentication')" >> "$GITHUB_ENV"
+          echo "HELM_ROLLBACK_VERSION=$(echo "$JSON_STRING" | jq -r '.helm.rollbackVersion')" >> "$GITHUB_ENV"
+          echo "HOST_NAME=$(echo "$JSON_STRING" | jq -r '.kubernetes.oc.route.host')" >> "$GITHUB_ENV"
+
+          # For helm Repo Authentication
+          echo "HELM_REPO_URL=$(echo "$JSON_STRING" | jq -r '.helm.repoURL')" >> "$GITHUB_ENV"
+          echo "HELM_REPO_USERNAME=$(echo "$JSON_STRING" | jq -r '.helm.repoUsername')" >> "$GITHUB_ENV"
+          echo "HELM_REPO_PASSWORD=$(echo "$JSON_STRING" | jq -r '.helm.repoPassword')" >> "$GITHUB_ENV"
+
+          # validating release name
+          export RELEASE_NAME_HELM=$(echo "$JSON_STRING" | jq -r '.general.name')"
+          set +x
+          if [[ $RELEASE_NAME =~ ^[A-Za-z0-9-]+$ ]]; then
+              echo "Helm release name is valid"
+          else
+              echo "Helm release name is not valid"
+              exit 1;
+          fi
+          set -x
+
+      - name: Configure Kubeconfig File
+        env:
+          KUBE_CONFIG: ${{ secrets[env.KUBERNETES_SECRET] }}
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ env.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
