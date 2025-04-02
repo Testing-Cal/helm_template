@@ -79,3 +79,77 @@ jobs:
         run: |
           mkdir -p $HOME/.kube
           echo "${{ env.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
+
+      - name: Helm install
+        if: env.ACTION == 'DEPLOY'
+        run: |
+          # Creating namespace 
+          docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" $KUBECTL_IMAGE_VERSION create ns "$KUBERNETES_NAMESPACE" || true
+
+          # if deployment type is 'OPENSHIFT'
+          if [[ $DEPLOYMENT_TYPE == 'OPENSHIFT' ]];then
+              COUNT=$(grep 'serviceAccount' Helm.yaml | wc -l)
+              if [[ $COUNT -gt 0 ]]
+              then
+                  ACCOUNT=$(grep 'serviceAccount:' Helm.yaml | tail -n1 | awk '{ print $2}')
+                  echo $ACCOUNT
+              else
+                  ACCOUNT='default'
+              fi
+              docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $OC_IMAGE_VERSION oc adm policy add-scc-to-user anyuid -z $ACCOUNT -n "$KUBERNETES_NAMESPACE"
+           fi
+           
+            
+           if [[ $ARTIFACTORY != "ECR" ]];then
+             ## hardcoded name regcred need to be change
+             docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" $KUBECTL_IMAGE_VERSION -n "$KUBE_NAMESPACE" delete secret regcred --ignore-not-found || true
+             docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" $KUBECTL_IMAGE_VERSION -n "$KUBE_NAMESPACE" create secret docker-registry regcred --docker-server="$REGISTRY_URL" --docker-username=${{ secrets[env.ARTIFACTORY_USER_SECRET] }} --docker-password=${{ secrets[env.ARTIFACTORY_PASSWORD_SECRET] }} || true
+           fi
+
+           # if chart type is lazsa
+           if [[ $HELM_CHART_TYPE == 'lazsa' ]];then
+                echo "Actual helm installation for lazsa"
+                cat Helm.yaml 
+                if [[ $DEPLOYMENT_TYPE == 'OPENSHIFT' && $CONTEXT_PATH != '']];then 
+                    docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION template "$RELEASE_NAME" ./$HELM_CHART_LOCATION -n "$KUBERNETES_NAMESPACE" --values ./helm_chart/values.yaml --set ingress.enabled=false --set oc.route.enabled="true" --set oc.route.host=$HOST_NAME --set context=$CONTEXT_PATH $HELM_VALUES -f Helm.yaml
+                    docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION upgrade --install $HELM_ARGUMENTS "$RELEASE_NAME" ./$HELM_CHART_LOCATION -n "$KUBERNETES_NAMESPACE" --values ./helm_chart/values.yaml --set ingress.enabled="false" --set oc.route.enabled="true" --set oc.route.host=$HOST_NAME --set context=$CONTEXT_PATH $HELM_VALUES -f Helm.yaml
+                else if [[ $DEPLOYMENT_TYPE == 'OPENSHIFT' && $CONTEXT_PATH == '' ]];then
+                    # Openshift Deployment without Context Path 
+                    docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION template "$RELEASE_NAME" ./$HELM_CHART_LOCATION -n "$KUBERNETES_NAMESPACE" --values ./helm_chart/values.yaml --set ingress.enabled=false --set oc.route.enabled="true" --set oc.route.host=$HOST_NAME $HELM_VALUES -f Helm.yaml
+                    docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION upgrade --install $HELM_ARGUMENTS "$RELEASE_NAME" ./$HELM_CHART_LOCATION -n "$KUBERNETES_NAMESPACE" --values ./helm_chart/values.yaml --set ingress.enabled="false" --set oc.route.enabled="true" --set oc.route.host=$HOST_NAME $HELM_VALUES -f Helm.yaml
+                else if [[ $CONTEXT_PATH == '' ]];then 
+                    # K8s Deployment without context path
+                    docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION upgrade --install $HELM_ARGUMENTS "$RELEASE_NAME" ./$HELM_CHART_LOCATION -n "$KUBERNETES_NAMESPACE" --values ./helm_chart/values.yaml $HELM_VALUES -f Helm.yaml
+                else{
+                    # k8s deployment with context Path
+                    docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION upgrade --install $HELM_ARGUMENTS "$RELEASE_NAME" ./$HELM_CHART_LOCATION -n "$KUBERNETES_NAMESPACE" --values ./helm_chart/values.yaml --set ingress.enabled="true" --set ingress.hosts[0].paths[0].path=$CONTEXT_PATH $HELM_VALUES -f Helm.yaml
+                }
+           fi
+
+      - name: Helm Uninstall
+        if: env.ACTION == 'DESTROY'
+        run: |
+          # Uninstall 
+          set +x
+          export RELEASE_STATUS=$(docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION status $RELEASE_NAME -n "$KUBERNETES_NAMESPACE")
+          echo $RELEASE_STATUS
+          if [[ "$RELEASE_STATUS" != "Error: release: not found" ]];then
+              echo "Release Present"
+              docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION uninstall $RELEASE_NAME -n "$KUBERNETES_NAMESPACE"
+          else
+              echo "Release not found"
+          fi
+          set -x
+
+      - name: Helm Rollback
+        if: env.ACTION == 'ROLLBACK'
+        run: | 
+          export RELEASE_STATUS=$(docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION status $RELEASE_NAME -n "$KUBERNETES_NAMESPACE")
+          echo $RELEASE_STATUS
+          if [[ "$RELEASE_STATUS" != "Error: release: not found" ]];then
+                echo "Release Present, going for Rollback"
+                docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION rollback $RELEASE_NAME $HELM_ROLLBACK_VERSION
+                docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION history $RELEASE_NAME
+            else
+                echo "Release not found"
+            fi
