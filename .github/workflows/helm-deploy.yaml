@@ -120,10 +120,10 @@ jobs:
                 else if [[ $CONTEXT_PATH == '' ]];then 
                     # K8s Deployment without context path
                     docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION upgrade --install $HELM_ARGUMENTS "$RELEASE_NAME" ./$HELM_CHART_LOCATION -n "$KUBERNETES_NAMESPACE" --values ./helm_chart/values.yaml $HELM_VALUES -f Helm.yaml
-                else{
+                else
                     # k8s deployment with context Path
                     docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION upgrade --install $HELM_ARGUMENTS "$RELEASE_NAME" ./$HELM_CHART_LOCATION -n "$KUBERNETES_NAMESPACE" --values ./helm_chart/values.yaml --set ingress.enabled="true" --set ingress.hosts[0].paths[0].path=$CONTEXT_PATH $HELM_VALUES -f Helm.yaml
-                }
+                fi
            fi
 
       - name: Helm Uninstall
