@@ -17,7 +17,7 @@ jobs:
       HELM_IMAGE_VERSION: "alpine/helm:3.8.1" #https://hub.docker.com/r/alpine/helm/tags
       OC_IMAGE_VERSION: "quay.io/openshift/origin-cli:4.9.0" #https://quay.io/repository/openshift/origin-cli?tab=tags
 
-
+  
     steps:
       - name: Checkout Code
         uses: actions/checkout@v2
@@ -56,6 +56,8 @@ jobs:
           echo "HELM_REPO_AUTHENTICATION=$(echo "$JSON_STRING" | jq -r '.helm.repoAuthentication')" >> "$GITHUB_ENV"
           echo "HELM_ROLLBACK_VERSION=$(echo "$JSON_STRING" | jq -r '.helm.rollbackVersion')" >> "$GITHUB_ENV"
           echo "HOST_NAME=$(echo "$JSON_STRING" | jq -r '.kubernetes.oc.route.host')" >> "$GITHUB_ENV"
+          echo "HELM_REPO_NAME=$(echo "$JSON_STRING" | jq -r '.helm.repoName')" >> "$GITHUB_ENV"
+          echo "HELM_CHART_NAME=$(echo "$JSON_STRING" | jq -r '.chartName')" >> "$GITHUB_ENV"
 
           echo "$JSON_STRING" | jq -r '.helm.values' | yq --yaml-output > Helm.yaml
 
@@ -112,20 +114,31 @@ jobs:
            if [[ $HELM_CHART_TYPE == 'lazsa' ]];then
                 echo "Actual helm installation for lazsa"
                 cat Helm.yaml 
-                if [[ $DEPLOYMENT_TYPE == 'OPENSHIFT' && $CONTEXT_PATH != '' ]];then 
+                if [[ $DEPLOYMENT_TYPE == 'OPENSHIFT' ]] && [[ $CONTEXT_PATH != '' ]];then 
                     docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION template "$RELEASE_NAME" ./$HELM_CHART_LOCATION -n "$KUBERNETES_NAMESPACE" --values ./helm_chart/values.yaml --set ingress.enabled=false --set oc.route.enabled="true" --set oc.route.host=$HOST_NAME --set context=$CONTEXT_PATH $HELM_VALUES -f Helm.yaml
                     docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION upgrade --install $HELM_ARGUMENTS "$RELEASE_NAME" ./$HELM_CHART_LOCATION -n "$KUBERNETES_NAMESPACE" --values ./helm_chart/values.yaml --set ingress.enabled="false" --set oc.route.enabled="true" --set oc.route.host=$HOST_NAME --set context=$CONTEXT_PATH $HELM_VALUES -f Helm.yaml
-                elif [[ $DEPLOYMENT_TYPE == 'OPENSHIFT' && $CONTEXT_PATH == '' ]];then
+                elif [[ "$DEPLOYMENT_TYPE" == "OPENSHIFT" ]] && [[ "$CONTEXT_PATH" == '' ]]; then
                     # Openshift Deployment without Context Path 
                     docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION template "$RELEASE_NAME" ./$HELM_CHART_LOCATION -n "$KUBERNETES_NAMESPACE" --values ./helm_chart/values.yaml --set ingress.enabled=false --set oc.route.enabled="true" --set oc.route.host=$HOST_NAME $HELM_VALUES -f Helm.yaml
                     docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION upgrade --install $HELM_ARGUMENTS "$RELEASE_NAME" ./$HELM_CHART_LOCATION -n "$KUBERNETES_NAMESPACE" --values ./helm_chart/values.yaml --set ingress.enabled="false" --set oc.route.enabled="true" --set oc.route.host=$HOST_NAME $HELM_VALUES -f Helm.yaml
-                elif [[ $CONTEXT_PATH == '' ]];then 
+                elif [[ "$CONTEXT_PATH" == '' ]];then 
                     # K8s Deployment without context path
                     docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION upgrade --install $HELM_ARGUMENTS "$RELEASE_NAME" ./$HELM_CHART_LOCATION -n "$KUBERNETES_NAMESPACE" --values ./helm_chart/values.yaml $HELM_VALUES -f Helm.yaml
                 else
                     # k8s deployment with context Path
                     docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION upgrade --install $HELM_ARGUMENTS "$RELEASE_NAME" ./$HELM_CHART_LOCATION -n "$KUBERNETES_NAMESPACE" --values ./helm_chart/values.yaml --set ingress.enabled="true" --set ingress.hosts[0].paths[0].path=$CONTEXT_PATH $HELM_VALUES -f Helm.yaml
                 fi
+           elif [[ "$HELM_CHART_TYPE" == 'external' ]];then
+                echo "Helm chart with type external"
+                docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION upgrade --install $HELM_ARGUMENTS "$RELEASE_NAME" ./$HELM_CHART_LOCATION -n "$KUBERNETES_NAMESPACE" $HELM_VALUES -f Helm.yaml
+           elif [[ "$HELM_REPO_AUTHENTICATION" == 'true' ]] && [[ "$HELM_CHART_TYPE" == 'chart' ]];then
+                docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION repo add $HELM_REPO_NAME $HELM_REPO_URL --username $HELM_REPO_USERNAME --password $HELM_REPO_PASSWORD
+                docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION repo update
+                docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION upgrade --install $HELM_ARGUMENTS "$HELM_REPO_NAME/$HELM_CHART_NAME" "$RELEASE_NAME" $HELM_CHART_LOCATION --version=$HELM_CHART_VERSION -n "$KUBERNETES_NAMESPACE" $HELM_VALUES -f Helm.yaml
+           elif [[ $HELM_CHART_TYPE == 'chart' ]];then
+                docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION repo add "$HELM_REPO_NAME" $HELM_REPO_URL
+                docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION repo update
+                docker run --rm  --user root -v "$HOME/.kube/config":"/.kube/config" -e KUBECONFIG="/.kube/config" -v "$GITHUB_WORKSPACE":/apps -w /apps $HELM_IMAGE_VERSION upgrade --install $HELM_ARGUMENTS "$HELM_REPO_NAME/$HELM_CHART_NAME" "$RELEASE_NAME" $HELM_CHART_LOCATION --version=$HELM_CHART_VERSION -n "$KUBERNETES_NAMESPACE" $HELM_VALUES -f Helm.yaml
            fi
 
       - name: Helm Uninstall
